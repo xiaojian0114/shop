@@ -6,6 +6,16 @@ import org.example.shop.entity.OrderItem;
 import org.example.shop.mapper.OrderItemMapper;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+
 @Service
 public class OrderItemServiceImpl extends ServiceImpl<OrderItemMapper, OrderItem> implements IService<OrderItem> {
+
+
+
+    public List<OrderItem> getOrderItemsByOrderId(Long orderId) {
+        return this.lambdaQuery()
+                .eq(OrderItem::getOrderId, orderId)
+                .list();
+    }
 }

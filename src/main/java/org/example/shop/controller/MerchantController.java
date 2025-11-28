@@ -6,10 +6,8 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.example.shop.annotation.CurrentUser;
 import org.example.shop.common.Result;
-import org.example.shop.entity.Order;
-import org.example.shop.entity.Product;
-import org.example.shop.entity.Shop;
-import org.example.shop.entity.User;
+import org.example.shop.entity.*;
+import org.example.shop.service.impl.OrderItemServiceImpl;
 import org.example.shop.service.impl.OrderServiceImpl;
 import org.example.shop.service.impl.ProductServiceImpl;
 import org.example.shop.service.impl.ShopServiceImpl;
@@ -18,10 +16,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.time.LocalDateTime;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/merchant")
@@ -31,6 +27,7 @@ public class MerchantController {
     private final ShopServiceImpl shopService;
     private final ProductServiceImpl productService;
     private final OrderServiceImpl orderService;
+    private final OrderItemServiceImpl orderItemService;
 
 
     @GetMapping("/shops")
@@ -389,4 +386,71 @@ public class MerchantController {
 
         return Result.ok(stats);
     }
+
+    @GetMapping("/order/{id}")
+    public Result getOrderDetail(@PathVariable Long id, @CurrentUser User user) {
+        System.out.println("开始查询订单详情，订单ID: " + id + ", 用户ID: " + user.getId());
+
+        Order order = orderService.getById(id);
+        if (order == null) {
+            System.out.println("订单不存在，ID: " + id);
+            return Result.fail("订单不存在");
+        }
+
+        System.out.println("找到订单，店铺ID: " + order.getShopId());
+
+        // 验证权限：确保查询的是自己店铺的订单
+        Shop shop = shopService.lambdaQuery()
+                .eq(Shop::getId, order.getShopId())
+                .eq(Shop::getMerchantId, user.getId())
+                .one();
+
+        if (shop == null) {
+            System.out.println("权限验证失败：用户 " + user.getId() + " 不是店铺 " + order.getShopId() + " 的商家");
+            return Result.fail("无权限查看该订单");
+        }
+
+        System.out.println("权限验证通过，开始查询订单项");
+
+        // 查询订单项信息
+        List<OrderItem> orderItems = orderItemService.getOrderItemsByOrderId(id);
+
+        // 如果订单项中没有商品信息，需要关联查询商品表
+        List<Map<String, Object>> orderItemDetails = orderItems.stream().map(item -> {
+            Map<String, Object> itemMap = new HashMap<>();
+            itemMap.put("id", item.getId());
+            itemMap.put("orderId", item.getOrderId());
+            itemMap.put("productId", item.getProductId());
+            itemMap.put("productName", item.getProductName());
+            itemMap.put("productImage", item.getProductImage());
+            itemMap.put("price", item.getPrice());
+            itemMap.put("num", item.getNum());
+
+            // 如果订单项中没有商品名称或图片，从商品表查询
+            if (item.getProductName() == null || item.getProductImage() == null) {
+                Product product = productService.getById(item.getProductId());
+                if (product != null) {
+                    itemMap.put("productName", product.getName());
+                    itemMap.put("productImage", product.getImage());
+                } else {
+                    itemMap.put("productName", "商品已下架");
+                    itemMap.put("productImage", "/static/default-product.jpg");
+                }
+            }
+
+            return itemMap;
+        }).collect(Collectors.toList());
+
+        // 构建返回数据
+        Map<String, Object> result = new HashMap<>();
+        result.put("order", order);
+        result.put("orderItems", orderItemDetails);
+
+        System.out.println("订单详情查询成功，找到 " + orderItemDetails.size() + " 个订单项");
+        return Result.ok(result);
+    }
+
+
+
+
 }
