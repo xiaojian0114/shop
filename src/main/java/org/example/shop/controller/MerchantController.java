@@ -115,7 +115,96 @@ public class MerchantController {
     public Result orders(@CurrentUser User user) {
         Shop shop = shopService.lambdaQuery().eq(Shop::getMerchantId, user.getId()).one();
         if (shop == null) return Result.ok(Collections.emptyList());
-        return Result.ok(orderService.lambdaQuery().eq(Order::getShopId, shop.getId()).list());
+
+        // 查询订单列表
+        List<Order> orders = orderService.lambdaQuery()
+                .eq(Order::getShopId, shop.getId())
+                .orderByDesc(Order::getCreateTime)
+                .list();
+
+        // 为每个订单添加订单项信息
+        List<Map<String, Object>> orderListWithItems = orders.stream().map(order -> {
+            Map<String, Object> orderMap = new HashMap<>();
+            // 添加订单基本信息
+            orderMap.put("id", order.getId());
+            orderMap.put("orderNumber", order.getOrderNo());
+            orderMap.put("totalAmount", order.getTotalAmount());
+            orderMap.put("status", order.getStatus());
+            orderMap.put("createTime", order.getCreateTime());
+
+            orderMap.put("address", order.getAddress());
+            orderMap.put("payTime", order.getPayTime());
+            orderMap.put("deliverTime", order.getDeliverTime());
+
+            // 获取订单项信息
+            List<OrderItem> orderItems = orderItemService.getOrderItemsByOrderId(order.getId());
+
+            // 转换订单项格式，确保包含商品信息
+            List<Map<String, Object>> itemDetails = orderItems.stream().map(item -> {
+                Map<String, Object> itemMap = new HashMap<>();
+                itemMap.put("id", item.getId());
+                itemMap.put("orderId", item.getOrderId());
+                itemMap.put("productId", item.getProductId());
+
+                // 设置商品名称和图片
+                if (item.getProductName() != null && !item.getProductName().isEmpty()) {
+                    itemMap.put("name", item.getProductName());
+                    itemMap.put("productName", item.getProductName());
+                } else {
+                    // 如果订单项中没有商品名称，从商品表查询
+                    Product product = productService.getById(item.getProductId());
+                    if (product != null) {
+                        itemMap.put("name", product.getName());
+                        itemMap.put("productName", product.getName());
+                    } else {
+                        itemMap.put("name", "商品");
+                        itemMap.put("productName", "商品");
+                    }
+                }
+
+                if (item.getProductImage() != null && !item.getProductImage().isEmpty()) {
+                    itemMap.put("image", item.getProductImage());
+                    itemMap.put("productImage", item.getProductImage());
+                } else {
+                    // 如果订单项中没有商品图片，从商品表查询
+                    Product product = productService.getById(item.getProductId());
+                    if (product != null && product.getImage() != null) {
+                        itemMap.put("image", product.getImage());
+                        itemMap.put("productImage", product.getImage());
+                    } else {
+                        itemMap.put("image", "/static/default-product.jpg");
+                        itemMap.put("productImage", "/static/default-product.jpg");
+                    }
+                }
+
+                itemMap.put("price", item.getPrice());
+                itemMap.put("quantity", item.getNum()); // 注意：这里使用 num 而不是 quantity
+                itemMap.put("num", item.getNum());
+
+                return itemMap;
+            }).collect(Collectors.toList());
+
+            // 如果订单项为空，添加默认商品项
+            if (itemDetails.isEmpty()) {
+                Map<String, Object> defaultItem = new HashMap<>();
+                defaultItem.put("id", 1L);
+                defaultItem.put("name", "商品");
+                defaultItem.put("productName", "商品");
+                defaultItem.put("image", "/static/default-product.jpg");
+                defaultItem.put("productImage", "/static/default-product.jpg");
+                defaultItem.put("price", order.getTotalAmount() != null ? order.getTotalAmount() : 0.00);
+                defaultItem.put("quantity", 1);
+                defaultItem.put("num", 1);
+                itemDetails.add(defaultItem);
+            }
+
+            orderMap.put("items", itemDetails);
+            orderMap.put("orderItems", itemDetails); // 兼容两种字段名
+
+            return orderMap;
+        }).collect(Collectors.toList());
+
+        return Result.ok(orderListWithItems);
     }
 
 
