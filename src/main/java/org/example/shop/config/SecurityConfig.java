@@ -6,6 +6,7 @@ import org.example.shop.common.JwtUtil;
 import org.example.shop.utils.JwtAuthenticationFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -27,6 +28,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 1. 完全公开：登录注册
                         .requestMatchers("/auth/**").permitAll()
+
+                        .requestMatchers(HttpMethod.POST, "/merchant/upload").authenticated()    // 上传要登录
+                        .requestMatchers("/upload/**").permitAll()                               // 图片访问完全公开
+                        .requestMatchers("/merchant/upload/**").permitAll()
 
                         // 2. 只要登录就能访问（买家、商家都行！）
                         .requestMatchers(
