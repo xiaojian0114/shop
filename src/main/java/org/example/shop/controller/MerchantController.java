@@ -2,6 +2,7 @@ package org.example.shop.controller;
 
 
 
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.example.shop.annotation.CurrentUser;
 import org.example.shop.common.Result;
@@ -18,7 +19,10 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+
 @RestController
 @RequestMapping("/merchant")
 @RequiredArgsConstructor
@@ -125,12 +129,12 @@ public class MerchantController {
         }
 
         try {
-            // 1. 生成文件名（防止重名）
+
             String originalName = file.getOriginalFilename();
             String suffix = originalName.substring(originalName.lastIndexOf("."));
             String fileName = System.currentTimeMillis() + "_" + (int)(Math.random() * 10000) + suffix;
 
-            // 2. 保存路径（你项目根目录下建个 upload 文件夹）
+
             String uploadDir = System.getProperty("user.dir") + "/upload/";
             File dir = new File(uploadDir);
             if (!dir.exists()) dir.mkdirs();
@@ -138,10 +142,10 @@ public class MerchantController {
             File savedFile = new File(uploadDir + fileName);
             file.transferTo(savedFile);
 
-            // 3. 返回可访问的 URL（前端直接能显示）
+
             String url = "http://localhost:8080/upload/" + fileName;
 
-            return Result.ok(url); // 前端就靠这个 url 显示图片和提交
+            return Result.ok(url);
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -156,7 +160,6 @@ public class MerchantController {
                 .eq(Shop::getMerchantId, user.getId())
                 .one();
 
-        // 如果你只想返回 name 和 logo，可以这样（可选）
         if (shop != null) {
             Shop simple = new Shop();
             simple.setId(shop.getId());
@@ -166,15 +169,14 @@ public class MerchantController {
             return Result.ok(simple);
         }
 
-        return Result.ok(null); // 没开店返回 null
+        return Result.ok(null);
     }
 
-    // ====== 2. 编辑店铺：只改 name 和 logo（最简最稳！）======
+
+
     @PostMapping("/shop/update")
     public Result updateShop(
-            @RequestParam(value = "id", required = true) Long id,  // 加这行！
-            @RequestParam("name") String name,
-            @RequestParam(value = "logo", required = false) MultipartFile logo,
+            @RequestBody UpdateShopRequest request,
             @CurrentUser User user) {
 
         Shop shop = shopService.lambdaQuery()
@@ -185,31 +187,206 @@ public class MerchantController {
             return Result.fail("请先申请开店");
         }
 
-        // 修改店铺名
-        shop.setName(name);
 
-        // 如果上传了新头像
-        if (logo != null && !logo.isEmpty()) {
-            try {
-                String originalName = logo.getOriginalFilename();
-                String suffix = originalName.substring(originalName.lastIndexOf("."));
-                String fileName = System.currentTimeMillis() + "_" + (int)(Math.random() * 10000) + suffix;
-
-                String uploadDir = System.getProperty("user.dir") + "/upload/";
-                new File(uploadDir).mkdirs();
-
-                File savedFile = new File(uploadDir + fileName);
-                logo.transferTo(savedFile);
-
-                String logoUrl = "http://localhost:8080/upload/" + fileName;
-                shop.setLogo(logoUrl);  // 关键！保存 logo 字段
-            } catch (Exception e) {
-                e.printStackTrace();
-                return Result.fail("头像上传失败");
-            }
+        shop.setName(request.getName());
+        if (request.getLogo() != null && !request.getLogo().isEmpty()) {
+            shop.setLogo(request.getLogo());
         }
 
         shopService.updateById(shop);
         return Result.ok("店铺信息更新成功");
+    }
+
+
+    @Data
+    public static class UpdateShopRequest {
+        private Long id;
+        private String name;
+        private String logo;
+    }
+
+
+    @GetMapping("/shop/detail/{id}")
+    public Result getShopDetail(@PathVariable Long id, @CurrentUser User user) {
+
+        Shop shop = shopService.lambdaQuery()
+                .eq(Shop::getId, id)
+                .eq(Shop::getMerchantId, user.getId())
+                .one();
+
+        if (shop == null) {
+            return Result.fail("店铺不存在或无权限");
+        }
+
+        List<Product> products = productService.lambdaQuery()
+                .eq(Product::getShopId, id)
+                .orderByDesc(Product::getCreateTime)
+                .list();
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("shopInfo", shop);
+        result.put("products", products);
+        result.put("productCount", products.size());
+
+        return Result.ok(result);
+    }
+
+
+    @GetMapping("/products/all")
+    public Result getAllProducts(@RequestParam Long shopId, @CurrentUser User user) {
+        boolean isMyShop = shopService.lambdaQuery()
+                .eq(Shop::getId, shopId)
+                .eq(Shop::getMerchantId, user.getId())
+                .exists();
+
+        if (!isMyShop) return Result.fail("无权限");
+
+        List<Product> products = productService.lambdaQuery()
+                .eq(Product::getShopId, shopId)
+                .orderByDesc(Product::getCreateTime)
+                .list();
+
+        return Result.ok(products);
+    }
+
+
+    @GetMapping("/product/{id}")
+    public Result getProductDetail(@PathVariable Long id, @CurrentUser User user) {
+        Product product = productService.getById(id);
+        if (product == null) {
+            return Result.fail("商品不存在");
+        }
+
+        // 验证权限：确保查询的是自己店铺的商品
+        Shop shop = shopService.getById(product.getShopId());
+        if (shop == null || !shop.getMerchantId().equals(user.getId())) {
+            return Result.fail("无权限查看该商品");
+        }
+
+        return Result.ok(product);
+    }
+
+
+    @PutMapping("/product/update")
+    public Result updateProduct(@RequestBody Product product, @CurrentUser User user) {
+        if (product.getId() == null) {
+            return Result.fail("商品ID不能为空");
+        }
+
+
+        Product existingProduct = productService.getById(product.getId());
+        if (existingProduct == null) {
+            return Result.fail("商品不存在");
+        }
+
+        Shop shop = shopService.getById(existingProduct.getShopId());
+        if (shop == null || !shop.getMerchantId().equals(user.getId())) {
+            return Result.fail("无权限修改该商品");
+        }
+
+
+        existingProduct.setName(product.getName());
+        existingProduct.setPrice(product.getPrice());
+
+        existingProduct.setStock(product.getStock());
+        existingProduct.setImage(product.getImage());
+
+        boolean success = productService.updateById(existingProduct);
+        if (success) {
+            return Result.ok("商品更新成功");
+        } else {
+            return Result.fail("商品更新失败");
+        }
+    }
+    @GetMapping("/merchant/info")
+    public Result getMerchantInfo(@CurrentUser User user) {
+        // 返回商家基本信息，包括店铺信息
+        Map<String, Object> result = new HashMap<>();
+        result.put("userInfo", user);
+
+        // 获取店铺信息
+        Shop shop = shopService.lambdaQuery()
+                .eq(Shop::getMerchantId, user.getId())
+                .one();
+
+        if (shop != null) {
+            Map<String, Object> shopInfo = new HashMap<>();
+            shopInfo.put("id", shop.getId());
+            shopInfo.put("name", shop.getName());
+            shopInfo.put("logo", shop.getLogo());
+            shopInfo.put("status", shop.getStatus());
+            result.put("shopInfo", shopInfo);
+        }
+
+        return Result.ok(result);
+    }
+
+    // 新增：搜索商品
+    @GetMapping("/product/search")
+    public Result searchProducts(
+            @RequestParam Long shopId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Integer status,
+            @CurrentUser User user) {
+
+        boolean isMyShop = shopService.lambdaQuery()
+                .eq(Shop::getId, shopId)
+                .eq(Shop::getMerchantId, user.getId())
+                .exists();
+
+        if (!isMyShop) return Result.fail("无权限");
+
+        // 构建查询条件
+        var query = productService.lambdaQuery()
+                .eq(Product::getShopId, shopId);
+
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            query.like(Product::getName, keyword.trim());
+        }
+
+        if (status != null) {
+            query.eq(Product::getIsOnSale, status);
+        }
+
+        query.orderByDesc(Product::getCreateTime);
+
+        List<Product> products = query.list();
+        return Result.ok(products);
+    }
+
+    @GetMapping("/order/stats")
+    public Result getOrderStats(@CurrentUser User user) {
+        Shop shop = shopService.lambdaQuery()
+                .eq(Shop::getMerchantId, user.getId())
+                .one();
+
+        if (shop == null) {
+            return Result.ok(Collections.emptyMap());
+        }
+
+        Map<String, Object> stats = new HashMap<>();
+
+        // 待发货订单数量
+        long pendingDelivery = orderService.lambdaQuery()
+                .eq(Order::getShopId, shop.getId())
+                .eq(Order::getStatus, 2) // 假设状态2是待发货
+                .count();
+
+        // 今日订单数量
+        LocalDateTime todayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
+        LocalDateTime todayEnd = LocalDateTime.now().withHour(23).withMinute(59).withSecond(59);
+
+        long todayOrders = orderService.lambdaQuery()
+                .eq(Order::getShopId, shop.getId())
+                .between(Order::getCreateTime, todayStart, todayEnd)
+                .count();
+
+        stats.put("pendingDelivery", pendingDelivery);
+        stats.put("todayOrders", todayOrders);
+        stats.put("totalProducts", productService.lambdaQuery()
+                .eq(Product::getShopId, shop.getId())
+                .count());
+
+        return Result.ok(stats);
     }
 }
