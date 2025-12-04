@@ -47,7 +47,10 @@ public class SecurityConfig {
                         // 3. 商家专属接口（必须是商家角色）
                         .requestMatchers("/merchant/**").hasRole("MERCHANT")
 
-                        // 4. 其他所有接口都要登录
+                        // 4. 管理员专属接口（必须是管理员角色）
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
+
+                        // 5. 其他所有接口都要登录
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(new JwtAuthenticationFilter(jwtUtil), UsernamePasswordAuthenticationFilter.class);
