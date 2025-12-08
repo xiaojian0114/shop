@@ -17,3 +17,5 @@ mybatis-plus:
   type-aliases-package: org.example.shop.entity
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+

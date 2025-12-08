@@ -14,7 +14,6 @@ import org.example.shop.service.impl.ShopServiceImpl;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.File;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -28,6 +27,7 @@ public class MerchantController {
     private final ProductServiceImpl productService;
     private final OrderServiceImpl orderService;
     private final OrderItemServiceImpl orderItemService;
+    private final org.example.shop.utils.OssUtil ossUtil;
 
 
     @GetMapping("/shops")
@@ -215,27 +215,13 @@ public class MerchantController {
         }
 
         try {
-
-            String originalName = file.getOriginalFilename();
-            String suffix = originalName.substring(originalName.lastIndexOf("."));
-            String fileName = System.currentTimeMillis() + "_" + (int)(Math.random() * 10000) + suffix;
-
-
-            String uploadDir = System.getProperty("user.dir") + "/upload/";
-            File dir = new File(uploadDir);
-            if (!dir.exists()) dir.mkdirs();
-
-            File savedFile = new File(uploadDir + fileName);
-            file.transferTo(savedFile);
-
-
-            String url = "http://localhost:8080/upload/" + fileName;
-
+            // 使用阿里云OSS上传
+            String originalFileName = file.getOriginalFilename();
+            String url = ossUtil.uploadFile(file.getInputStream(), originalFileName);
             return Result.ok(url);
-
         } catch (Exception e) {
             e.printStackTrace();
-            return Result.fail("上传失败");
+            return Result.fail("上传失败: " + e.getMessage());
         }
     }
 
